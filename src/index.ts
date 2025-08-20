@@ -9,11 +9,14 @@ import { type Db, MongoClient } from 'mongodb';
 
 const app = new Hono();
 
+let db: Db;
+let client: MongoClient;
+
 type ErrorResponse = {
   error: string;
   debug?: {
     message: string;
-    stack?: string;
+    stack: string | undefined;
     name: string;
     timestamp: string;
     requestId: string;
@@ -23,6 +26,7 @@ type ErrorResponse = {
 app.onError((err, c) => {
   let status: HTTPException['status'] = 500;
   let message = 'Internal server error';
+
   const errorResponse: ErrorResponse = { error: message };
 
   if (err instanceof HTTPException) {
@@ -67,9 +71,6 @@ app.use(
 
 app.use(prettyJSON());
 
-let db: Db;
-let client: MongoClient;
-
 async function initMongoDB() {
   const mongoUrl = process.env.MONGODB_URL || 'mongodb://localhost:27017';
   const dbName = process.env.DB_NAME || 'testdb';
@@ -85,7 +86,10 @@ async function initMongoDB() {
   }
 }
 
-function validateRequest(body: any, requiredFields: string[]) {
+function validateRequest(
+  body: Record<string, unknown>,
+  requiredFields: string[]
+) {
   if (!body) {
     throw new HTTPException(400, { message: 'Request body is required' });
   }
@@ -291,18 +295,26 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-async function startServer() {
+export async function startServer() {
   await initMongoDB();
 
-  serve(
-    {
-      fetch: app.fetch,
-      port: process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 3000,
-    },
-    (info) => {
-      console.log(`Server is running on :${info.port}`);
-    }
-  );
+  const port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : 3000;
+
+  return new Promise<{ port: number }>((resolve) => {
+    serve(
+      {
+        fetch: app.fetch,
+        port,
+      },
+      (info) => {
+        console.log(`Server is running on :${info.port}`);
+        resolve(info);
+      }
+    );
+  });
 }
 
-startServer().catch(console.error);
+// If this file is run directly (not imported), start the server
+if (import.meta.url === `file://${process.argv[1]}`) {
+  startServer().catch(console.error);
+}

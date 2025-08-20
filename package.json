@@ -4,7 +4,12 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "start": "node src/start.js",
+    "start:compiled": "node dist/index.js",
+    "dev": "ts-node --esm src/index.ts",
+    "test": "npm run build && node --test test/*.test.js",
+    "test:watch": "node --test --watch test/*.test.js"
   },
   "license": "MIT",
   "dependencies": {
@@ -17,6 +22,7 @@
     "@biomejs/biome": "^2.2.0",
     "@total-typescript/tsconfig": "^1.0.4",
     "@types/node": "^24.3.0",
+    "testcontainers": "^11.5.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.2"
   }
