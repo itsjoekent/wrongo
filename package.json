@@ -1,0 +1,23 @@
+{
+  "name": "wrongo",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@hono/node-server": "^1.19.0",
+    "@hono/zod-openapi": "^1.1.0",
+    "hono": "^4.9.2",
+    "mongodb": "^6.18.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@total-typescript/tsconfig": "^1.0.4",
+    "@types/node": "^24.3.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}
