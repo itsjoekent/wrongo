@@ -47,6 +47,7 @@ Anti-Fascist MIT License
 
 ## Todo
 
-- [ ] lru cache w/ change streams
-
+- [ ] zod based validation?
+- [ ] transaction endpoint
+- [ ] lru cache w/ change streams?
 - [ ] open telemetry
