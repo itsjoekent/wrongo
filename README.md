@@ -16,7 +16,6 @@ Connect Cloudflare Workers 🌐 to MongoDB 💾 through an API (_for SQL haters 
 ### Prerequisites
 - Node.js 22.18.0 or higher
 - Docker (for testing with testcontainers)
-- MongoDB instance (for development)
 
 ### Local Development
 
@@ -49,5 +48,4 @@ Anti-Fascist MIT License
 
 - [ ] zod based validation?
 - [ ] transaction endpoint
-- [ ] lru cache w/ change streams?
 - [ ] open telemetry
