@@ -1,0 +1,660 @@
+openapi: 3.0.3
+info:
+  title: MongoDB API
+  description: A REST API for MongoDB operations with basic authentication and read replica support
+  version: "1.0.0"
+  contact:
+    name: MongoDB API
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+  - url: https://api.example.com
+    description: Production server
+
+security:
+  - basicAuth: []
+
+paths:
+  /:
+    get:
+      summary: Health check
+      description: Returns API status and version information
+      responses:
+        '200':
+          description: API is running successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      message:
+                        type: string
+                        example: "MongoDB API is running"
+                      version:
+                        type: string
+                        example: "v0"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/find:
+    post:
+      summary: Find documents
+      description: Find documents in a collection with optional filter and options
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                filter:
+                  type: object
+                  description: MongoDB query filter
+                  example: { "status": "active" }
+                options:
+                  type: object
+                  description: MongoDB find options
+                  example: { "limit": 10, "sort": { "createdAt": -1 } }
+      responses:
+        '200':
+          description: Documents found successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: number
+                    description: Number of documents returned
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/find-one:
+    post:
+      summary: Find one document
+      description: Find a single document in a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                filter:
+                  type: object
+                  description: MongoDB query filter
+                  example: { "_id": "507f1f77bcf86cd799439011" }
+                options:
+                  type: object
+                  description: MongoDB findOne options
+                  example: { "projection": { "password": 0 } }
+      responses:
+        '200':
+          description: Document found successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    nullable: true
+                    description: The found document or null if not found
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/insert-one:
+    post:
+      summary: Insert one document
+      description: Insert a single document into a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+                - document
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                document:
+                  type: object
+                  description: Document to insert
+                  example: { "name": "John Doe", "email": "john@example.com" }
+                options:
+                  type: object
+                  description: MongoDB insertOne options
+      responses:
+        '200':
+          description: Document inserted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    description: The inserted document with generated _id
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/insert-many:
+    post:
+      summary: Insert many documents
+      description: Insert multiple documents into a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+                - documents
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                documents:
+                  type: array
+                  items:
+                    type: object
+                  description: Array of documents to insert
+                  example: [
+                    { "name": "John Doe", "email": "john@example.com" },
+                    { "name": "Jane Smith", "email": "jane@example.com" }
+                  ]
+                options:
+                  type: object
+                  description: MongoDB insertMany options
+      responses:
+        '200':
+          description: Documents inserted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                    description: Array of inserted documents with generated _ids
+                  count:
+                    type: number
+                    description: Number of documents inserted
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/update-one:
+    post:
+      summary: Update one document
+      description: Update a single document in a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+                - filter
+                - update
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                filter:
+                  type: object
+                  description: MongoDB query filter
+                  example: { "_id": "507f1f77bcf86cd799439011" }
+                update:
+                  type: object
+                  description: MongoDB update operation
+                  example: { "$set": { "status": "inactive" } }
+                options:
+                  type: object
+                  description: MongoDB findOneAndUpdate options
+      responses:
+        '200':
+          description: Document updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    nullable: true
+                    description: The updated document or null if not found
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/update-many:
+    post:
+      summary: Update many documents
+      description: Update multiple documents in a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+                - filter
+                - update
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                filter:
+                  type: object
+                  description: MongoDB query filter
+                  example: { "status": "active" }
+                update:
+                  type: object
+                  description: MongoDB update operation
+                  example: { "$set": { "lastUpdated": "2024-01-01T00:00:00Z" } }
+                options:
+                  type: object
+                  description: MongoDB updateMany options
+      responses:
+        '200':
+          description: Documents updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                    description: Array of updated documents
+                  modifiedCount:
+                    type: number
+                    description: Number of documents modified
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/delete-one:
+    post:
+      summary: Delete one document
+      description: Delete a single document from a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+                - filter
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                filter:
+                  type: object
+                  description: MongoDB query filter
+                  example: { "_id": "507f1f77bcf86cd799439011" }
+                options:
+                  type: object
+                  description: MongoDB deleteOne options
+      responses:
+        '200':
+          description: Document deletion completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deletedCount:
+                    type: number
+                    description: Number of documents deleted (0 or 1)
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/delete-many:
+    post:
+      summary: Delete many documents
+      description: Delete multiple documents from a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+                - filter
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                filter:
+                  type: object
+                  description: MongoDB query filter
+                  example: { "status": "inactive" }
+                options:
+                  type: object
+                  description: MongoDB deleteMany options
+      responses:
+        '200':
+          description: Document deletion completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deletedCount:
+                    type: number
+                    description: Number of documents deleted
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/count:
+    post:
+      summary: Count documents
+      description: Count documents in a collection with optional filter
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                filter:
+                  type: object
+                  description: MongoDB query filter
+                  example: { "status": "active" }
+                options:
+                  type: object
+                  description: MongoDB countDocuments options
+      responses:
+        '200':
+          description: Document count retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: number
+                    description: Number of matching documents
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/collections:
+    get:
+      summary: List collections
+      description: Get a list of all collections in the database
+      responses:
+        '200':
+          description: Collections retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: string
+                    description: Array of collection names
+                    example: ["users", "posts", "comments"]
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/create-index:
+    post:
+      summary: Create index
+      description: Create an index on a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+                - keys
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                keys:
+                  type: object
+                  description: Index specification
+                  example: { "email": 1 }
+                options:
+                  type: object
+                  description: Index options
+                  example: { "unique": true, "name": "email_unique" }
+      responses:
+        '200':
+          description: Index created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      indexName:
+                        type: string
+                        description: Name of the created index
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /v0/drop-index:
+    post:
+      summary: Drop index
+      description: Drop an index from a collection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - collection
+                - index
+              properties:
+                collection:
+                  type: string
+                  description: Name of the collection
+                  example: "users"
+                index:
+                  type: string
+                  description: Name of the index to drop
+                  example: "email_unique"
+                options:
+                  type: object
+                  description: Drop index options
+      responses:
+        '200':
+          description: Index dropped successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      acknowledged:
+                        type: boolean
+                        description: Whether the operation was acknowledged
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: Basic HTTP authentication with username and password
+
+  responses:
+    BadRequestError:
+      description: Bad request - invalid input or missing required fields
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Field 'collection' is required"
+
+    UnauthorizedError:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Unauthorized"
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: "Internal server error"
+            debug:
+              message: "Connection to MongoDB failed"
+              stack: "Error: Connection failed\n    at MongoClient.connect..."
+              name: "MongoError"
+              timestamp: "2024-01-01T12:00:00.000Z"
+              requestId: "req-12345"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message
+        debug:
+          type: object
+          description: Debug information (only present when DEBUG=true)
+          properties:
+            message:
+              type: string
+              description: Error message
+            stack:
+              type: string
+              description: Stack trace
+            name:
+              type: string
+              description: Error name
+            timestamp:
+              type: string
+              format: date-time
+              description: Error timestamp
+            requestId:
+              type: string
+              description: Request ID for tracing
+
+tags:
+  - name: Health
+    description: API health and status endpoints
+  - name: Documents
+    description: Document CRUD operations
+  - name: Collections
+    description: Collection management
+  - name: Indexes
+    description: Index management 

@@ -1,8 +1,8 @@
 import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
+import { serveStatic } from '@hono/node-server/serve-static';
+import { type Context, Hono } from 'hono';
 import { basicAuth } from 'hono/basic-auth';
 import { HTTPException } from 'hono/http-exception';
-import { logger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 import { timeout } from 'hono/timeout';
 import { type Db, MongoClient } from 'mongodb';
@@ -11,6 +11,42 @@ const app = new Hono();
 
 let db: Db;
 let client: MongoClient;
+
+type LogLevel = 'info' | 'error' | 'warn' | 'debug';
+
+function structuredLog(
+  level: LogLevel,
+  message: string,
+  data?: Record<string, unknown>
+) {
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    ...data,
+  };
+  console.log(JSON.stringify(logEntry));
+}
+
+function errorLog(
+  level: LogLevel,
+  message: string,
+  error: unknown,
+  data?: Record<string, unknown>
+) {
+  const errorData = error instanceof Error ? {
+    name: error.name,
+    message: error.message,
+    stack: error.stack
+  } : error;
+  
+  structuredLog(level, message, { error: errorData, ...data });
+}
+
+function requestLog(c: Context, level: LogLevel, message: string, data?: Record<string, unknown>) {
+  const requestId = c.req.header('x-request-id') || 'unknown';
+  structuredLog(level, message, { requestId, ...data });
+}
 
 type ErrorResponse = {
   error: string;
@@ -37,7 +73,14 @@ app.onError((err, c) => {
 
   if (status >= 500) {
     const requestId = c.req.header('x-request-id') || 'unknown';
-    console.error(`Internal server error [request id: ${requestId}]`, err);
+    structuredLog('error', 'Internal server error', {
+      requestId,
+      error: {
+        name: err.name,
+        message: err.message,
+        stack: err.stack
+      }
+    });
   }
 
   if (process.env.DEBUG === 'true') {
@@ -53,12 +96,28 @@ app.onError((err, c) => {
   return c.json(errorResponse, status);
 });
 
-app.use('*', logger());
+app.use('*', async (c, next) => {
+  const { method, url } = c.req;
+  const path = url.slice(url.indexOf('/', 8));
+
+  requestLog(c, 'info', 'incoming request', { method, path });
+
+  const start = Date.now();
+  await next();
+
+  const delta = Date.now() - start;
+  requestLog(c, 'info', 'outgoing response', { method, path, status: c.res.status, duration: `${delta}ms` });
+});
 
 app.use(
   '*',
-  timeout(10000, () => new HTTPException(408, { message: 'Request timed out' }))
+  timeout(
+    10000,
+    () => new HTTPException(408, { message: 'Request timed out' }),
+  ),
 );
+
+app.use('/openapi.yml', serveStatic({ path: '../openapi.yml' }));
 
 app.use(
   '*',
@@ -66,29 +125,42 @@ app.use(
     username: process.env.AUTH_USERNAME || 'admin',
     password: process.env.AUTH_PASSWORD || 'password',
     realm: 'MongoDB API',
-  })
+  }),
 );
 
 app.use(prettyJSON());
 
 async function initMongoDB() {
-  const mongoUrl = process.env.MONGODB_URL || 'mongodb://localhost:27017';
-  const dbName = process.env.DB_NAME || 'testdb';
+  const baseMongoUrl = process.env.MONGODB_URL;
+  if (!baseMongoUrl) {
+    throw new Error('MONGODB_URL is not set');
+  }
+
+  const mongoUrl = new URL(baseMongoUrl);
+  mongoUrl.searchParams.set('readPreference', 'secondaryPreferred');
+
+  const dbName = process.env.DB_NAME;
+  if (!dbName) {
+    throw new Error('DB_NAME is not set');
+  }
 
   try {
-    client = new MongoClient(mongoUrl);
+    client = new MongoClient(mongoUrl.toString());
     await client.connect();
     db = client.db(dbName);
-    console.log(`Connected to MongoDB: ${mongoUrl}/${dbName}`);
+    structuredLog('info', 'Connected to MongoDB', { 
+      url: mongoUrl.toString(), 
+      database: dbName 
+    });
   } catch (error) {
-    console.error('Failed to connect to MongoDB:', error);
+    errorLog('error', 'Failed to connect to MongoDB', error, { url: mongoUrl.toString(), database: dbName });
     process.exit(1);
   }
 }
 
 function validateRequest(
   body: Record<string, unknown>,
-  requiredFields: string[]
+  requiredFields: string[],
 ) {
   if (!body) {
     throw new HTTPException(400, { message: 'Request body is required' });
@@ -288,7 +360,7 @@ app.post('/v0/drop-index', async (c) => {
 });
 
 process.on('SIGINT', async () => {
-  console.log('\nShutting down gracefully...');
+  structuredLog('info', 'Shutting down gracefully');
   if (client) {
     await client.close();
   }
@@ -307,14 +379,16 @@ export async function startServer() {
         port,
       },
       (info) => {
-        console.log(`Server is running on :${info.port}`);
+        structuredLog('info', 'Server started', { port: info.port });
         resolve(info);
-      }
+      },
     );
   });
 }
 
 // If this file is run directly (not imported), start the server
 if (import.meta.url === `file://${process.argv[1]}`) {
-  startServer().catch(console.error);
+  startServer().catch((error) => {
+    errorLog('error', 'Failed to start server', error);
+  });
 }

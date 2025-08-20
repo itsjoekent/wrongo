@@ -1,6 +1,6 @@
 # wrongo
 
-Connect Cloudflare Workers 🌐 to MongoDB 💾 through an API (for SQL haters like me).
+Connect Cloudflare Workers 🌐 to MongoDB 💾 through an API (_for SQL haters like me_).
 
 ## Features
 
@@ -14,7 +14,7 @@ Connect Cloudflare Workers 🌐 to MongoDB 💾 through an API (for SQL haters l
 ## Getting Started
 
 ### Prerequisites
-- Node.js 20.15.0 or higher
+- Node.js 22.18.0 or higher
 - Docker (for testing with testcontainers)
 - MongoDB instance (for development)
 
@@ -46,10 +46,7 @@ Anti-Fascist MIT License
 
 ## Todo
 
-- [ ] open api schema
 - [ ] transactions
-- [ ] read replica
 - [ ] lru cache w/ change streams
-- [ ] add logging
-- [ ] add sentry
-- [ ] add nvmrc, fill out readme
+
+- [ ] open telemetry
