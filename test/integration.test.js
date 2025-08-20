@@ -3,39 +3,73 @@ import { after, afterEach, before, describe, it } from 'node:test';
 import { MongoClient } from 'mongodb';
 import { GenericContainer } from 'testcontainers';
 
-let mongoContainer;
+let mongoContainers = [];
 let mongoClient;
 let serverInfo;
 let baseUrl;
 
 describe('MongoDB REST API Integration Tests', () => {
   before(async () => {
-    console.log('Starting MongoDB container...');
+    console.log('↺ Starting MongoDB replica set...');
 
-    // Start MongoDB container
-    mongoContainer = await new GenericContainer('mongo:7')
+    // Start single MongoDB container with replica set enabled
+    const replicaSetName = 'rs0';
+    console.log('↺ Starting MongoDB container...');
+    
+    const container = await new GenericContainer('mongo:7')
       .withExposedPorts(27017)
-      .withEnvironment({
-        MONGO_INITDB_ROOT_USERNAME: 'testuser',
-        MONGO_INITDB_ROOT_PASSWORD: 'testpass',
-      })
+      .withCommand(['mongod', '--replSet', replicaSetName, '--bind_ip_all'])
       .start();
 
-    const mongoPort = mongoContainer.getMappedPort(27017);
-    const mongoUrl = `mongodb://testuser:testpass@localhost:${mongoPort}`;
+    mongoContainers.push(container);
+    const mongoPort = container.getMappedPort(27017);
+    console.log(`✓ MongoDB started on port ${mongoPort}`);
 
-    // Connect to MongoDB for test setup
-    mongoClient = new MongoClient(mongoUrl);
-    await mongoClient.connect();
+    console.log('↺ Waiting for MongoDB to start...');
+    await new Promise(resolve => setTimeout(resolve, 10000));
 
-    console.log(`MongoDB container started on port ${mongoPort}`);
+    console.log('↺ Initializing replica set using mongosh...');
+    
+    try {
+      const initCommand = `rs.initiate({_id:'${replicaSetName}',members:[{_id:0,host:'localhost:27017'}]})`;
+      const result = await container.exec(['mongosh', '--quiet', '--eval', initCommand]);
+      
+      if (result.output.includes('{ ok: 1 }') || result.output.includes('"ok" : 1')) {
+        console.log('✓ Replica set initialized successfully');
+      } else {
+        console.log('⚠ Replica set initialization may have failed:', result.output);
+      }
+      
+
+      console.log('↺ Waiting for replica set to be ready...');
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+    } catch (error) {
+      console.error('⚠ Error initializing replica set:', error.message);
+      throw error;
+    }
+
+    // Connect with replica set - use directConnection to bypass discovery issues
+    const replicaSetUrl = `mongodb://localhost:${mongoPort}/?replicaSet=${replicaSetName}&directConnection=true&serverSelectionTimeoutMS=30000&connectTimeoutMS=30000`;    
+    mongoClient = new MongoClient(replicaSetUrl);
+
+    try {
+      await mongoClient.connect();
+      console.log('✓ Connected to MongoDB replica set');
+
+      const adminDb = mongoClient.db('admin');
+      await adminDb.command({ ismaster: 1 });
+    } catch (error) {
+      console.error('⚠ Failed to connect to replica set:', error.message);
+      throw error;
+    }
 
     // Start the API server with test configuration
     const serverPort = 3001; // Use different port for testing
     baseUrl = `http://localhost:${serverPort}`;
 
     // Set environment variables for the server
-    process.env.MONGODB_URL = mongoUrl;
+    process.env.MONGODB_URL = replicaSetUrl;
     process.env.DB_NAME = 'testdb';
     process.env.AUTH_USERNAME = 'testuser';
     process.env.AUTH_PASSWORD = 'testpass';
@@ -48,24 +82,25 @@ describe('MongoDB REST API Integration Tests', () => {
     // Wait a bit for server to be ready
     await new Promise((resolve) => setTimeout(resolve, 2000));
 
-    console.log(`API server started on port ${serverInfo.port}`);
+    console.log(`✓ API server started on port ${serverInfo.port}`);
   });
 
   after(async () => {
-    console.log('Cleaning up test environment...');
+    console.log('↺ Cleaning up test environment...');
 
     try {
       if (mongoClient) {
         await mongoClient.close();
       }
 
-      if (mongoContainer) {
-        await mongoContainer.stop();
+      for (const container of mongoContainers) {
+        console.log('↺ Stopping MongoDB container...');
+        await container.stop();
       }
 
-      console.log('Test cleanup completed');
+      console.log('✓ Test cleanup completed');
     } catch (error) {
-      console.error('Error during cleanup:', error);
+      console.error('⚠ Error during cleanup:', error);
     } finally {
       // Force exit since the server doesn't have an easy close method
       process.exit(0);

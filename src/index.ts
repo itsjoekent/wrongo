@@ -137,7 +137,11 @@ async function initMongoDB() {
   }
 
   const mongoUrl = new URL(baseMongoUrl);
-  mongoUrl.searchParams.set('readPreference', 'secondaryPreferred');
+  // Only set secondaryPreferred for non-transaction operations
+  // For transactions, we'll use primary read preference by default
+  if (!mongoUrl.searchParams.has('readPreference')) {
+    mongoUrl.searchParams.set('readPreference', 'secondaryPreferred');
+  }
 
   const dbName = process.env.DB_NAME;
   if (!dbName) {

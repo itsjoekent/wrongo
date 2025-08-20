@@ -18,10 +18,11 @@ Connect Cloudflare Workers 🌐 to MongoDB 💾 through an API (_for SQL haters 
 - Docker (for testing with testcontainers)
 - MongoDB instance (for development)
 
-### Installation
+### Local Development
 
 ```bash
 npm install
+npm test
 ```
 
 ## Testing
@@ -38,7 +39,7 @@ This project uses **Node.js native test runner** ([documentation](https://nodejs
 
 ## Contributing
 
-I built this for myself to use on side projects where I want a cheap database and a flexible schema. If you want to use it, cool! But I'm mostly sharing this for others to fork & reuse, I'm not actively seeking outside contributions or looking to maintain this for others 🙂
+I built this for myself to use on side projects where I want a cheap database and a flexible schema. If you want to use it, cool! But I'm mostly sharing this for others to fork & reuse with their own Cloudflare Worker projects, I'm not actively seeking outside contributions or looking to maintain this for others 🙂
 
 ## License
 
@@ -46,7 +47,6 @@ Anti-Fascist MIT License
 
 ## Todo
 
-- [ ] transactions
 - [ ] lru cache w/ change streams
 
 - [ ] open telemetry
