@@ -1,21 +1,38 @@
-import assert from 'node:assert';
-import { after, afterEach, before, describe, it } from 'node:test';
-import { MongoClient } from 'mongodb';
-import { GenericContainer } from 'testcontainers';
+import { MongoClient, type Db } from 'mongodb';
+import { GenericContainer, StartedTestContainer } from 'testcontainers';
+import { describe, it, beforeAll, afterAll, afterEach, expect } from 'vitest';
 
-let mongoContainers = [];
-let mongoClient;
-let serverInfo;
-let baseUrl;
+interface ServerInfo {
+  port: number;
+}
+
+interface MakeRequestOptions extends RequestInit {
+  headers?: Record<string, string>;
+}
+
+interface TestDocument {
+  name: string;
+  value?: number;
+  type?: string;
+  email?: string;
+  updated?: boolean;
+  batchUpdated?: boolean;
+  _id?: string;
+}
+
+const mongoContainers: StartedTestContainer[] = [];
+let mongoClient: MongoClient;
+let serverInfo: ServerInfo;
+let baseUrl: string;
 
 describe('MongoDB REST API Integration Tests', () => {
-  before(async () => {
+  beforeAll(async () => {
     console.log('↺ Starting MongoDB replica set...');
 
     // Start single MongoDB container with replica set enabled
     const replicaSetName = 'rs0';
     console.log('↺ Starting MongoDB container...');
-    
+
     const container = await new GenericContainer('mongo:7')
       .withExposedPorts(27017)
       .withCommand(['mongod', '--replSet', replicaSetName, '--bind_ip_all'])
@@ -26,41 +43,56 @@ describe('MongoDB REST API Integration Tests', () => {
     console.log(`✓ MongoDB started on port ${mongoPort}`);
 
     console.log('↺ Waiting for MongoDB to start...');
-    await new Promise(resolve => setTimeout(resolve, 10000));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10000));
 
     console.log('↺ Initializing replica set using mongosh...');
-    
+
     try {
       const initCommand = `rs.initiate({_id:'${replicaSetName}',members:[{_id:0,host:'localhost:27017'}]})`;
-      const result = await container.exec(['mongosh', '--quiet', '--eval', initCommand]);
-      
-      if (result.output.includes('{ ok: 1 }') || result.output.includes('"ok" : 1')) {
+      const result = await container.exec([
+        'mongosh',
+        '--quiet',
+        '--eval',
+        initCommand,
+      ]);
+
+      if (
+        result.output.includes('{ ok: 1 }') ||
+        result.output.includes('"ok" : 1')
+      ) {
         console.log('✓ Replica set initialized successfully');
       } else {
-        console.log('⚠ Replica set initialization may have failed:', result.output);
+        console.log(
+          '⚠ Replica set initialization may have failed:',
+          result.output
+        );
       }
-      
 
       console.log('↺ Waiting for replica set to be ready...');
-      await new Promise(resolve => setTimeout(resolve, 5000));
-      
+      await new Promise<void>((resolve) => setTimeout(resolve, 5000));
     } catch (error) {
-      console.error('⚠ Error initializing replica set:', error.message);
+      console.error(
+        '⚠ Error initializing replica set:',
+        (error as Error).message
+      );
       throw error;
     }
 
     // Connect with replica set - use directConnection to bypass discovery issues
-    const replicaSetUrl = `mongodb://localhost:${mongoPort}/?replicaSet=${replicaSetName}&directConnection=true&serverSelectionTimeoutMS=30000&connectTimeoutMS=30000`;    
+    const replicaSetUrl = `mongodb://localhost:${mongoPort}/?replicaSet=${replicaSetName}&directConnection=true&serverSelectionTimeoutMS=30000&connectTimeoutMS=30000`;
     mongoClient = new MongoClient(replicaSetUrl);
 
     try {
       await mongoClient.connect();
       console.log('✓ Connected to MongoDB replica set');
 
-      const adminDb = mongoClient.db('admin');
+      const adminDb: Db = mongoClient.db('admin');
       await adminDb.command({ ismaster: 1 });
     } catch (error) {
-      console.error('⚠ Failed to connect to replica set:', error.message);
+      console.error(
+        '⚠ Failed to connect to replica set:',
+        (error as Error).message
+      );
       throw error;
     }
 
@@ -73,19 +105,21 @@ describe('MongoDB REST API Integration Tests', () => {
     process.env.DB_NAME = 'testdb';
     process.env.AUTH_USERNAME = 'testuser';
     process.env.AUTH_PASSWORD = 'testpass';
-    process.env.PORT = serverPort;
+    process.env.PORT = serverPort.toString();
 
     // Import and start server (this will be a dynamic import to allow env vars to be set first)
-    const { startServer } = await import('../dist/index.js');
+    const { startServer } = (await import('../dist/index.js')) as {
+      startServer: () => Promise<ServerInfo>;
+    };
     serverInfo = await startServer();
 
     // Wait a bit for server to be ready
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise<void>((resolve) => setTimeout(resolve, 2000));
 
     console.log(`✓ API server started on port ${serverInfo.port}`);
   });
 
-  after(async () => {
+  afterAll(async () => {
     console.log('↺ Cleaning up test environment...');
 
     try {
@@ -101,9 +135,6 @@ describe('MongoDB REST API Integration Tests', () => {
       console.log('✓ Test cleanup completed');
     } catch (error) {
       console.error('⚠ Error during cleanup:', error);
-    } finally {
-      // Force exit since the server doesn't have an easy close method
-      process.exit(0);
     }
   });
 
@@ -111,7 +142,7 @@ describe('MongoDB REST API Integration Tests', () => {
     // Reset database after each test for isolation
     if (mongoClient) {
       try {
-        const db = mongoClient.db('testdb');
+        const db: Db = mongoClient.db('testdb');
         const collections = await db.listCollections().toArray();
 
         // Drop all collections to ensure clean state
@@ -120,16 +151,22 @@ describe('MongoDB REST API Integration Tests', () => {
         }
 
         console.log(
-          `Reset database: dropped ${collections.length} collections`
+          `! Reset database: dropped ${collections.length} collections`
         );
       } catch (error) {
-        console.warn('Warning: Failed to reset database:', error.message);
+        console.warn(
+          'Warning: Failed to reset database:',
+          (error as Error).message
+        );
       }
     }
   });
 
   // Helper function to make authenticated requests
-  async function makeRequest(path, options = {}) {
+  async function makeRequest(
+    path: string,
+    options: MakeRequestOptions = {}
+  ): Promise<Response> {
     const auth = Buffer.from('testuser:testpass').toString('base64');
 
     try {
@@ -148,7 +185,7 @@ describe('MongoDB REST API Integration Tests', () => {
         let errorBody = 'No body';
 
         try {
-          if (contentType && contentType.includes('application/json')) {
+          if (contentType?.includes('application/json')) {
             errorBody = JSON.stringify(await response.clone().json(), null, 2);
           } else {
             errorBody = await response.clone().text();
@@ -166,7 +203,7 @@ describe('MongoDB REST API Integration Tests', () => {
     } catch (error) {
       console.error(
         `Network error for ${options.method || 'GET'} ${path}:`,
-        error.message
+        (error as Error).message
       );
       throw error;
     }
@@ -175,30 +212,30 @@ describe('MongoDB REST API Integration Tests', () => {
   describe('Health Check', () => {
     it('should return health check information', async () => {
       const response = await makeRequest('/');
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert.strictEqual(data.data.message, 'MongoDB API is running');
-      assert.strictEqual(data.data.version, 'v0');
+      expect(data.data.message).toBe('MongoDB API is running');
+      expect(data.data.version).toBe('v0');
     });
   });
 
   describe('Collection Operations', () => {
     it('should list collections', async () => {
       const response = await makeRequest('/v0/collections');
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert(Array.isArray(data.data));
+      expect(Array.isArray(data.data)).toBe(true);
     });
   });
 
   describe('Document CRUD Operations', () => {
     const testCollection = 'test_collection';
-    let insertedId;
+    let insertedId: string;
 
     it('should insert a single document', async () => {
-      const testDoc = { name: 'Test Document', value: 42 };
+      const testDoc: TestDocument = { name: 'Test Document', value: 42 };
 
       const response = await makeRequest('/v0/insert-one', {
         method: 'POST',
@@ -208,20 +245,20 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert(data.data);
-      assert(data.data._id);
-      assert.strictEqual(data.data.name, testDoc.name);
-      assert.strictEqual(data.data.value, testDoc.value);
+      expect(data.data).toBeTruthy();
+      expect(data.data._id).toBeTruthy();
+      expect(data.data.name).toBe(testDoc.name);
+      expect(data.data.value).toBe(testDoc.value);
 
       insertedId = data.data._id;
     });
 
     it('should find documents', async () => {
       // Setup: Insert a document first
-      const testDoc = { name: 'Test Document', value: 42 };
+      const testDoc: TestDocument = { name: 'Test Document', value: 42 };
       await makeRequest('/v0/insert-one', {
         method: 'POST',
         body: JSON.stringify({
@@ -238,16 +275,16 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert.strictEqual(data.count, 1);
-      assert.strictEqual(data.data[0].name, 'Test Document');
+      expect(data.count).toBe(1);
+      expect(data.data[0].name).toBe('Test Document');
     });
 
     it('should find one document', async () => {
       // Setup: Insert a document first
-      const testDoc = { name: 'Test Document', value: 42 };
+      const testDoc: TestDocument = { name: 'Test Document', value: 42 };
       await makeRequest('/v0/insert-one', {
         method: 'POST',
         body: JSON.stringify({
@@ -264,16 +301,16 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert(data.data);
-      assert.strictEqual(data.data.name, 'Test Document');
+      expect(data.data).toBeTruthy();
+      expect(data.data.name).toBe('Test Document');
     });
 
     it('should count documents', async () => {
       // Setup: Insert a document first
-      const testDoc = { name: 'Test Document', value: 42 };
+      const testDoc: TestDocument = { name: 'Test Document', value: 42 };
       await makeRequest('/v0/insert-one', {
         method: 'POST',
         body: JSON.stringify({
@@ -290,14 +327,14 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert.strictEqual(data.count, 1);
+      expect(data.count).toBe(1);
     });
 
     it('should insert multiple documents', async () => {
-      const testDocs = [
+      const testDocs: TestDocument[] = [
         { name: 'Doc 1', type: 'batch' },
         { name: 'Doc 2', type: 'batch' },
         { name: 'Doc 3', type: 'batch' },
@@ -311,16 +348,16 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert.strictEqual(data.count, 3);
-      assert.strictEqual(data.data.length, 3);
+      expect(data.count).toBe(3);
+      expect(data.data.length).toBe(3);
     });
 
     it('should update one document', async () => {
       // Setup: Insert a document first
-      const testDoc = { name: 'Test Document', value: 42 };
+      const testDoc: TestDocument = { name: 'Test Document', value: 42 };
       await makeRequest('/v0/insert-one', {
         method: 'POST',
         body: JSON.stringify({
@@ -338,15 +375,15 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert(data.data);
+      expect(data.data).toBeTruthy();
     });
 
     it('should update many documents', async () => {
       // Setup: Insert batch documents first
-      const testDocs = [
+      const testDocs: TestDocument[] = [
         { name: 'Doc 1', type: 'batch' },
         { name: 'Doc 2', type: 'batch' },
         { name: 'Doc 3', type: 'batch' },
@@ -369,16 +406,16 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert.strictEqual(data.modifiedCount, 3);
-      assert.strictEqual(data.data.length, 3);
+      expect(data.modifiedCount).toBe(3);
+      expect(data.data.length).toBe(3);
     });
 
     it('should delete one document', async () => {
       // Setup: Insert a document first
-      const testDoc = { name: 'Doc 1', type: 'batch' };
+      const testDoc: TestDocument = { name: 'Doc 1', type: 'batch' };
       await makeRequest('/v0/insert-one', {
         method: 'POST',
         body: JSON.stringify({
@@ -395,15 +432,15 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert.strictEqual(data.deletedCount, 1);
+      expect(data.deletedCount).toBe(1);
     });
 
     it('should delete many documents', async () => {
       // Setup: Insert batch documents first
-      const testDocs = [
+      const testDocs: TestDocument[] = [
         { name: 'Doc 2', type: 'batch' },
         { name: 'Doc 3', type: 'batch' },
       ];
@@ -424,10 +461,10 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert.strictEqual(data.deletedCount, 2);
+      expect(data.deletedCount).toBe(2);
     });
   });
 
@@ -453,10 +490,10 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert(data.data.indexName);
+      expect(data.data.indexName).toBeTruthy();
     });
 
     it('should drop an index', async () => {
@@ -486,10 +523,10 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 200);
+      expect(response.status).toBe(200);
 
       const data = await response.json();
-      assert(data.data);
+      expect(data.data).toBeTruthy();
       // Just verify we get a response - MongoDB dropIndex behavior varies
     });
   });
@@ -501,11 +538,11 @@ describe('MongoDB REST API Integration Tests', () => {
         body: JSON.stringify({}), // Missing collection field
       });
 
-      assert.strictEqual(response.status, 400);
+      expect(response.status).toBe(400);
 
       const data = await response.json();
-      assert(data.error);
-      assert(data.error.includes('collection'));
+      expect(data.error).toBeTruthy();
+      expect(data.error.includes('collection')).toBe(true);
     });
 
     it('should return 400 for invalid documents array', async () => {
@@ -517,16 +554,16 @@ describe('MongoDB REST API Integration Tests', () => {
         }),
       });
 
-      assert.strictEqual(response.status, 400);
+      expect(response.status).toBe(400);
 
       const data = await response.json();
-      assert(data.error);
-      assert(data.error.includes('array'));
+      expect(data.error).toBeTruthy();
+      expect(data.error.includes('array')).toBe(true);
     });
 
     it('should require authentication', async () => {
       const response = await fetch(`${baseUrl}/`);
-      assert.strictEqual(response.status, 401);
+      expect(response.status).toBe(401);
     });
   });
 });
