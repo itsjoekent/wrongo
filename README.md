@@ -1,6 +1,6 @@
 # wrongo
 
-Connect Cloudflare Workers 🌐 to MongoDB 💾 through an API (_for SQL haters like me_).
+Connect Cloudflare Workers 🌐 to MongoDB 🍃 through an API (_for SQL haters like me_).
 
 ## Features
 
