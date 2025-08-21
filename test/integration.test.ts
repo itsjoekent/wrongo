@@ -1,6 +1,6 @@
-import { MongoClient, type Db } from 'mongodb';
-import { GenericContainer, StartedTestContainer } from 'testcontainers';
-import { describe, it, beforeAll, afterAll, afterEach, expect } from 'vitest';
+import { type Db, MongoClient } from 'mongodb';
+import { GenericContainer, type StartedTestContainer } from 'testcontainers';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 interface ServerInfo {
   port: number;
@@ -64,7 +64,7 @@ describe('MongoDB REST API Integration Tests', () => {
       } else {
         console.log(
           '⚠ Replica set initialization may have failed:',
-          result.output
+          result.output,
         );
       }
 
@@ -73,7 +73,7 @@ describe('MongoDB REST API Integration Tests', () => {
     } catch (error) {
       console.error(
         '⚠ Error initializing replica set:',
-        (error as Error).message
+        (error as Error).message,
       );
       throw error;
     }
@@ -91,7 +91,7 @@ describe('MongoDB REST API Integration Tests', () => {
     } catch (error) {
       console.error(
         '⚠ Failed to connect to replica set:',
-        (error as Error).message
+        (error as Error).message,
       );
       throw error;
     }
@@ -151,12 +151,12 @@ describe('MongoDB REST API Integration Tests', () => {
         }
 
         console.log(
-          `! Reset database: dropped ${collections.length} collections`
+          `! Reset database: dropped ${collections.length} collections`,
         );
       } catch (error) {
         console.warn(
           'Warning: Failed to reset database:',
-          (error as Error).message
+          (error as Error).message,
         );
       }
     }
@@ -165,7 +165,7 @@ describe('MongoDB REST API Integration Tests', () => {
   // Helper function to make authenticated requests
   async function makeRequest(
     path: string,
-    options: MakeRequestOptions = {}
+    options: MakeRequestOptions = {},
   ): Promise<Response> {
     const auth = Buffer.from('testuser:testpass').toString('base64');
 
@@ -203,7 +203,7 @@ describe('MongoDB REST API Integration Tests', () => {
     } catch (error) {
       console.error(
         `Network error for ${options.method || 'GET'} ${path}:`,
-        (error as Error).message
+        (error as Error).message,
       );
       throw error;
     }
@@ -232,7 +232,7 @@ describe('MongoDB REST API Integration Tests', () => {
 
   describe('Document CRUD Operations', () => {
     const testCollection = 'test_collection';
-    let insertedId: string;
+    let _insertedId: string;
 
     it('should insert a single document', async () => {
       const testDoc: TestDocument = { name: 'Test Document', value: 42 };
@@ -253,7 +253,7 @@ describe('MongoDB REST API Integration Tests', () => {
       expect(data.data.name).toBe(testDoc.name);
       expect(data.data.value).toBe(testDoc.value);
 
-      insertedId = data.data._id;
+      _insertedId = data.data._id;
     });
 
     it('should find documents', async () => {
@@ -528,6 +528,264 @@ describe('MongoDB REST API Integration Tests', () => {
       const data = await response.json();
       expect(data.data).toBeTruthy();
       // Just verify we get a response - MongoDB dropIndex behavior varies
+    });
+  });
+
+  describe('Transaction Operations', () => {
+    const testCollection = 'transaction_test_collection';
+    const counterCollection = 'counter_collection';
+
+    it('should execute successful transaction with multiple operations', async () => {
+      // Setup: Insert a counter document
+      await makeRequest('/v0/insert-one', {
+        method: 'POST',
+        body: JSON.stringify({
+          collection: counterCollection,
+          document: { name: 'userCounter', value: 0 },
+        }),
+      });
+
+      const response = await makeRequest('/v0/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          operations: [
+            {
+              type: 'insertOne',
+              collection: testCollection,
+              document: {
+                name: 'John Doe',
+                email: 'john@example.com',
+                status: 'active',
+              },
+            },
+            {
+              type: 'findOneAndUpdate',
+              collection: counterCollection,
+              filter: { name: 'userCounter' },
+              update: { $inc: { value: 1 } },
+            },
+          ],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+
+      const data = await response.json();
+      expect(data.operationCount).toBe(2);
+      expect(data.data.length).toBe(2);
+
+      // Verify insertOne result
+      const insertResult = data.data[0];
+      expect(insertResult.type).toBe('insertOne');
+      expect(insertResult.collection).toBe(testCollection);
+      expect(insertResult.data.name).toBe('John Doe');
+      expect(insertResult.data.email).toBe('john@example.com');
+      expect(insertResult.insertedId).toBeTruthy();
+
+      // Verify findOneAndUpdate result
+      const updateResult = data.data[1];
+      expect(updateResult.type).toBe('findOneAndUpdate');
+      expect(updateResult.collection).toBe(counterCollection);
+      expect(updateResult.data.value).toBe(1);
+    });
+
+    it('should execute transaction with deleteOne operation', async () => {
+      // Setup: Insert documents to delete
+      await makeRequest('/v0/insert-many', {
+        method: 'POST',
+        body: JSON.stringify({
+          collection: testCollection,
+          documents: [
+            { name: 'Doc 1', status: 'active' },
+            { name: 'Doc 2', status: 'inactive' },
+            { name: 'Doc 3', status: 'active' },
+          ],
+        }),
+      });
+
+      const response = await makeRequest('/v0/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          operations: [
+            {
+              type: 'deleteOne',
+              collection: testCollection,
+              filter: { status: 'inactive' },
+            },
+            {
+              type: 'findOneAndUpdate',
+              collection: testCollection,
+              filter: { name: 'Doc 1' },
+              update: { $set: { processed: true } },
+            },
+          ],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+
+      const data = await response.json();
+      expect(data.operationCount).toBe(2);
+      expect(data.data.length).toBe(2);
+
+      // Verify deleteOne result
+      const deleteResult = data.data[0];
+      expect(deleteResult.type).toBe('deleteOne');
+      expect(deleteResult.deletedCount).toBe(1);
+
+      // Verify update result
+      const updateResult = data.data[1];
+      expect(updateResult.type).toBe('findOneAndUpdate');
+      expect(updateResult.data.processed).toBe(true);
+    });
+
+    it('should handle transaction with custom options', async () => {
+      const response = await makeRequest('/v0/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          operations: [
+            {
+              type: 'insertOne',
+              collection: testCollection,
+              document: {
+                name: 'Transaction Test',
+                timestamp: new Date().toISOString(),
+              },
+            },
+          ],
+          transactionOptions: {
+            readConcern: { level: 'majority' },
+            writeConcern: { w: 'majority' },
+            maxCommitTimeMS: 1000,
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+
+      const data = await response.json();
+      expect(data.operationCount).toBe(1);
+      expect(data.data[0].type).toBe('insertOne');
+      expect(data.data[0].data.name).toBe('Transaction Test');
+    });
+
+    it('should return 400 for empty operations array', async () => {
+      const response = await makeRequest('/v0/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          operations: [],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+
+      const data = await response.json();
+      expect(data.error).toBe('At least one operation is required');
+    });
+
+    it('should return 400 for invalid findOneAndUpdate operation', async () => {
+      const response = await makeRequest('/v0/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          operations: [
+            {
+              type: 'findOneAndUpdate',
+              collection: testCollection,
+              filter: { name: 'test' },
+              // Missing update field
+            },
+          ],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+
+      const data = await response.json();
+      expect(data.error).toContain(
+        'findOneAndUpdate requires filter and update fields',
+      );
+    });
+
+    it('should return 400 for invalid insertOne operation', async () => {
+      const response = await makeRequest('/v0/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          operations: [
+            {
+              type: 'insertOne',
+              collection: testCollection,
+              // Missing document field
+            },
+          ],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+
+      const data = await response.json();
+      expect(data.error).toContain('insertOne requires document field');
+    });
+
+    it('should return 400 for invalid deleteOne operation', async () => {
+      const response = await makeRequest('/v0/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          operations: [
+            {
+              type: 'deleteOne',
+              collection: testCollection,
+              // Missing filter field
+            },
+          ],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+
+      const data = await response.json();
+      expect(data.error).toContain('deleteOne requires filter field');
+    });
+
+    it('should ensure atomicity - all operations succeed or all fail', async () => {
+      // Setup: Insert a document to update
+      await makeRequest('/v0/insert-one', {
+        method: 'POST',
+        body: JSON.stringify({
+          collection: testCollection,
+          document: { name: 'Atomic Test', value: 10 },
+        }),
+      });
+
+      // This transaction should succeed completely
+      const successResponse = await makeRequest('/v0/transaction', {
+        method: 'POST',
+        body: JSON.stringify({
+          operations: [
+            {
+              type: 'findOneAndUpdate',
+              collection: testCollection,
+              filter: { name: 'Atomic Test' },
+              update: { $set: { value: 20, processed: true } },
+            },
+            {
+              type: 'insertOne',
+              collection: testCollection,
+              document: { name: 'Related Record', parentName: 'Atomic Test' },
+            },
+          ],
+        }),
+      });
+
+      expect(successResponse.status).toBe(200);
+
+      const successData = await successResponse.json();
+      expect(successData.operationCount).toBe(2);
+      expect(successData.data.length).toBe(2);
+
+      // Verify both operations completed
+      expect(successData.data[0].data.value).toBe(20);
+      expect(successData.data[0].data.processed).toBe(true);
+      expect(successData.data[1].data.name).toBe('Related Record');
     });
   });
 

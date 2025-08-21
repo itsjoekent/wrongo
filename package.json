@@ -10,14 +10,17 @@
     "dev": "ts-node --esm src/index.ts",
     "test": "npm run build && vitest run",
     "test:watch": "npm run build && vitest",
-    "test:ui": "npm run build && vitest --ui"
+    "test:ui": "npm run build && vitest --ui",
+    "biome:check": "biome check .",
+    "biome:fix": "biome check --write ."
   },
   "license": "MIT",
   "dependencies": {
     "@hono/node-server": "^1.19.0",
     "@hono/zod-openapi": "^1.1.0",
     "hono": "^4.9.2",
-    "mongodb": "^6.18.0"
+    "mongodb": "^6.18.0",
+    "zod": "^4.0.17"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.0",

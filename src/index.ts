@@ -6,6 +6,7 @@ import { HTTPException } from 'hono/http-exception';
 import { prettyJSON } from 'hono/pretty-json';
 import { timeout } from 'hono/timeout';
 import { type Db, MongoClient } from 'mongodb';
+import { z } from 'zod';
 
 const app = new Hono();
 
@@ -17,7 +18,7 @@ type LogLevel = 'info' | 'error' | 'warn' | 'debug';
 function structuredLog(
   level: LogLevel,
   message: string,
-  data?: Record<string, unknown>
+  data?: Record<string, unknown>,
 ) {
   const logEntry = {
     timestamp: new Date().toISOString(),
@@ -32,18 +33,26 @@ function errorLog(
   level: LogLevel,
   message: string,
   error: unknown,
-  data?: Record<string, unknown>
+  data?: Record<string, unknown>,
 ) {
-  const errorData = error instanceof Error ? {
-    name: error.name,
-    message: error.message,
-    stack: error.stack
-  } : error;
-  
+  const errorData =
+    error instanceof Error
+      ? {
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+        }
+      : error;
+
   structuredLog(level, message, { error: errorData, ...data });
 }
 
-function requestLog(c: Context, level: LogLevel, message: string, data?: Record<string, unknown>) {
+function requestLog(
+  c: Context,
+  level: LogLevel,
+  message: string,
+  data?: Record<string, unknown>,
+) {
   const requestId = c.req.header('x-request-id') || 'unknown';
   structuredLog(level, message, { requestId, ...data });
 }
@@ -72,14 +81,12 @@ app.onError((err, c) => {
   }
 
   if (status >= 500) {
-    const requestId = c.req.header('x-request-id') || 'unknown';
-    structuredLog('error', 'Internal server error', {
-      requestId,
+    requestLog(c, 'error', 'Internal server error', {
       error: {
         name: err.name,
         message: err.message,
-        stack: err.stack
-      }
+        stack: err.stack,
+      },
     });
   }
 
@@ -106,7 +113,12 @@ app.use('*', async (c, next) => {
   await next();
 
   const delta = Date.now() - start;
-  requestLog(c, 'info', 'outgoing response', { method, path, status: c.res.status, duration: `${delta}ms` });
+  requestLog(c, 'info', 'outgoing response', {
+    method,
+    path,
+    status: c.res.status,
+    duration: `${delta}ms`,
+  });
 });
 
 app.use(
@@ -152,29 +164,28 @@ async function initMongoDB() {
     client = new MongoClient(mongoUrl.toString());
     await client.connect();
     db = client.db(dbName);
-    structuredLog('info', 'Connected to MongoDB', { 
-      url: mongoUrl.toString(), 
-      database: dbName 
+    structuredLog('info', 'Connected to MongoDB', {
+      url: mongoUrl.toString(),
+      database: dbName,
     });
   } catch (error) {
-    errorLog('error', 'Failed to connect to MongoDB', error, { url: mongoUrl.toString(), database: dbName });
+    errorLog('error', 'Failed to connect to MongoDB', error, {
+      url: mongoUrl.toString(),
+      database: dbName,
+    });
     process.exit(1);
   }
 }
 
-function validateRequest(
-  body: Record<string, unknown>,
-  requiredFields: string[],
-) {
-  if (!body) {
-    throw new HTTPException(400, { message: 'Request body is required' });
+function validateWithZod<T>(schema: z.ZodSchema<T>, data: unknown): T {
+  const result = schema.safeParse(data);
+  if (!result.success) {
+    const errors = result.error.issues
+      .map((issue) => `${issue.path.join('.')}: ${issue.message}`)
+      .join(', ');
+    throw new HTTPException(400, { message: `Validation error: ${errors}` });
   }
-
-  for (const field of requiredFields) {
-    if (!body[field]) {
-      throw new HTTPException(400, { message: `Field '${field}' is required` });
-    }
-  }
+  return result.data;
 }
 
 app.get('/', async (c) => {
@@ -188,11 +199,15 @@ app.get('/', async (c) => {
   });
 });
 
+const FindSchema = z.object({
+  collection: z.string(),
+  filter: z.any().default({}),
+  options: z.any().default({}),
+});
+
 app.post('/v0/find', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection']);
-
-  const { collection, filter = {}, options = {} } = body;
+  const { collection, filter, options } = validateWithZod(FindSchema, body);
   const result = await db
     .collection(collection)
     .find(filter, options)
@@ -204,11 +219,15 @@ app.post('/v0/find', async (c) => {
   });
 });
 
+const FindOneSchema = z.object({
+  collection: z.string(),
+  filter: z.any().default({}),
+  options: z.any().default({}),
+});
+
 app.post('/v0/find-one', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection']);
-
-  const { collection, filter = {}, options = {} } = body;
+  const { collection, filter, options } = validateWithZod(FindOneSchema, body);
   const result = await db.collection(collection).findOne(filter, options);
 
   return c.json({
@@ -216,11 +235,18 @@ app.post('/v0/find-one', async (c) => {
   });
 });
 
+const InsertOneSchema = z.object({
+  collection: z.string(),
+  document: z.any(),
+  options: z.any().default({}),
+});
+
 app.post('/v0/insert-one', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection', 'document']);
-
-  const { collection, document, options = {} } = body;
+  const { collection, document, options } = validateWithZod(
+    InsertOneSchema,
+    body,
+  );
   const result = await db.collection(collection).insertOne(document, options);
 
   const insertedDocument = await db
@@ -232,15 +258,18 @@ app.post('/v0/insert-one', async (c) => {
   });
 });
 
+const InsertManySchema = z.object({
+  collection: z.string(),
+  documents: z.array(z.any()),
+  options: z.any().default({}),
+});
+
 app.post('/v0/insert-many', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection', 'documents']);
-
-  if (!Array.isArray(body.documents)) {
-    throw new HTTPException(400, { message: 'Documents must be an array' });
-  }
-
-  const { collection, documents, options = {} } = body;
+  const { collection, documents, options } = validateWithZod(
+    InsertManySchema,
+    body,
+  );
   const result = await db.collection(collection).insertMany(documents, options);
 
   const insertedDocuments = await db
@@ -254,11 +283,19 @@ app.post('/v0/insert-many', async (c) => {
   });
 });
 
+const UpdateOneSchema = z.object({
+  collection: z.string(),
+  filter: z.any(),
+  update: z.any(),
+  options: z.any().default({}),
+});
+
 app.post('/v0/update-one', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection', 'filter', 'update']);
-
-  const { collection, filter, update, options = {} } = body;
+  const { collection, filter, update, options } = validateWithZod(
+    UpdateOneSchema,
+    body,
+  );
 
   const result = await db
     .collection(collection)
@@ -269,11 +306,19 @@ app.post('/v0/update-one', async (c) => {
   });
 });
 
+const UpdateManySchema = z.object({
+  collection: z.string(),
+  filter: z.any(),
+  update: z.any(),
+  options: z.any().default({}),
+});
+
 app.post('/v0/update-many', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection', 'filter', 'update']);
-
-  const { collection, filter, update, options = {} } = body;
+  const { collection, filter, update, options } = validateWithZod(
+    UpdateManySchema,
+    body,
+  );
 
   const documentsToUpdate = await db
     .collection(collection)
@@ -296,11 +341,18 @@ app.post('/v0/update-many', async (c) => {
   });
 });
 
+const DeleteOneSchema = z.object({
+  collection: z.string(),
+  filter: z.any(),
+  options: z.any().default({}),
+});
+
 app.post('/v0/delete-one', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection', 'filter']);
-
-  const { collection, filter, options = {} } = body;
+  const { collection, filter, options } = validateWithZod(
+    DeleteOneSchema,
+    body,
+  );
   const result = await db.collection(collection).deleteOne(filter, options);
 
   return c.json({
@@ -308,11 +360,18 @@ app.post('/v0/delete-one', async (c) => {
   });
 });
 
+const DeleteManySchema = z.object({
+  collection: z.string(),
+  filter: z.any(),
+  options: z.any().default({}),
+});
+
 app.post('/v0/delete-many', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection', 'filter']);
-
-  const { collection, filter, options = {} } = body;
+  const { collection, filter, options } = validateWithZod(
+    DeleteManySchema,
+    body,
+  );
   const result = await db.collection(collection).deleteMany(filter, options);
 
   return c.json({
@@ -320,11 +379,15 @@ app.post('/v0/delete-many', async (c) => {
   });
 });
 
+const CountSchema = z.object({
+  collection: z.string(),
+  filter: z.any().default({}),
+  options: z.any().default({}),
+});
+
 app.post('/v0/count', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection']);
-
-  const { collection, filter = {}, options = {} } = body;
+  const { collection, filter, options } = validateWithZod(CountSchema, body);
   const count = await db.collection(collection).countDocuments(filter, options);
 
   return c.json({
@@ -339,11 +402,18 @@ app.get('/v0/collections', async (c) => {
   });
 });
 
+const CreateIndexSchema = z.object({
+  collection: z.string(),
+  keys: z.any(),
+  options: z.any().default({}),
+});
+
 app.post('/v0/create-index', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection', 'keys']);
-
-  const { collection, keys, options = {} } = body;
+  const { collection, keys, options } = validateWithZod(
+    CreateIndexSchema,
+    body,
+  );
   const result = await db.collection(collection).createIndex(keys, options);
 
   return c.json({
@@ -351,15 +421,158 @@ app.post('/v0/create-index', async (c) => {
   });
 });
 
+const DropIndexSchema = z.object({
+  collection: z.string(),
+  index: z.union([z.string(), z.any()]),
+  options: z.any().default({}),
+});
+
 app.post('/v0/drop-index', async (c) => {
   const body = await c.req.json();
-  validateRequest(body, ['collection', 'index']);
-
-  const { collection, index, options = {} } = body;
+  const { collection, index, options } = validateWithZod(DropIndexSchema, body);
   const result = await db.collection(collection).dropIndex(index, options);
 
   return c.json({
     data: { acknowledged: result.acknowledged },
+  });
+});
+
+const TransactionOperationSchema = z.object({
+  type: z.enum(['findOneAndUpdate', 'insertOne', 'deleteOne']),
+  collection: z.string(),
+  filter: z.any().optional(),
+  document: z.any().optional(),
+  update: z.any().optional(),
+  options: z.any().default({}),
+});
+
+const TransactionSchema = z.object({
+  operations: z.array(TransactionOperationSchema),
+  transactionOptions: z.any().default({}),
+});
+
+app.post('/v0/transaction', async (c) => {
+  const body = await c.req.json();
+  const { operations, transactionOptions } = validateWithZod(
+    TransactionSchema,
+    body,
+  );
+
+  if (operations.length === 0) {
+    throw new HTTPException(400, {
+      message: 'At least one operation is required',
+    });
+  }
+
+  for (const [index, operation] of operations.entries()) {
+    switch (operation.type) {
+      case 'findOneAndUpdate':
+        if (!operation.filter || !operation.update) {
+          throw new HTTPException(400, {
+            message: `Operation ${index}: findOneAndUpdate requires filter and update fields`,
+          });
+        }
+        break;
+      case 'insertOne':
+        if (!operation.document) {
+          throw new HTTPException(400, {
+            message: `Operation ${index}: insertOne requires document field`,
+          });
+        }
+        break;
+      case 'deleteOne':
+        if (!operation.filter) {
+          throw new HTTPException(400, {
+            message: `Operation ${index}: deleteOne requires filter field`,
+          });
+        }
+        break;
+    }
+  }
+
+  const results = await client.withSession(async (session) =>
+    session.withTransaction(
+      async (session) => {
+        const operationResults = [];
+
+        for (const operation of operations) {
+          const collection = db.collection(operation.collection);
+
+          switch (operation.type) {
+            case 'findOneAndUpdate': {
+              const result = await collection.findOneAndUpdate(
+                operation.filter,
+                operation.update,
+                {
+                  ...operation.options,
+                  session,
+                  returnDocument: 'after',
+                },
+              );
+              operationResults.push({
+                type: 'findOneAndUpdate',
+                collection: operation.collection,
+                data: result,
+              });
+              break;
+            }
+
+            case 'insertOne': {
+              const insertResult = await collection.insertOne(
+                operation.document,
+                { ...operation.options, session },
+              );
+
+              const insertedDocument = await collection.findOne(
+                { _id: insertResult.insertedId },
+                { session },
+              );
+
+              operationResults.push({
+                type: 'insertOne',
+                collection: operation.collection,
+                data: insertedDocument,
+                insertedId: insertResult.insertedId,
+              });
+              break;
+            }
+
+            case 'deleteOne': {
+              const deleteResult = await collection.deleteOne(
+                operation.filter,
+                {
+                  ...operation.options,
+                  session,
+                },
+              );
+
+              operationResults.push({
+                type: 'deleteOne',
+                collection: operation.collection,
+                deletedCount: deleteResult.deletedCount,
+              });
+              break;
+            }
+          }
+        }
+
+        return operationResults;
+      },
+      {
+        readPreference: 'primary',
+        ...transactionOptions,
+      },
+    ),
+  );
+
+  requestLog(c, 'info', 'Transaction completed successfully', {
+    operationCount: operations.length,
+    resultsCount: results.length,
+  });
+
+  return c.json({
+    data: results,
+    operationCount: operations.length,
   });
 });
 

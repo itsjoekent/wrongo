@@ -43,9 +43,3 @@ I built this for myself to use on side projects where I want a cheap database an
 ## License
 
 Anti-Fascist MIT License
-
-## Todo
-
-- [ ] zod based validation?
-- [ ] transaction endpoint
-- [ ] open telemetry

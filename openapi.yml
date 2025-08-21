@@ -581,7 +581,9 @@ paths:
   /v0/transaction:
     post:
       summary: Execute transaction
-      description: Execute multiple operations atomically within a single transaction
+      description: Execute multiple operations atomically within a single transaction. All operations will succeed or fail together.
+      tags:
+        - Transactions
       requestBody:
         required: true
         content:
@@ -596,22 +598,38 @@ paths:
                   description: Array of operations to execute atomically
                   minItems: 1
                   items:
-                    oneOf:
-                      - $ref: '#/components/schemas/FindOneOperation'
-                      - $ref: '#/components/schemas/InsertOneOperation'
-                      - $ref: '#/components/schemas/UpdateOneOperation'
-                      - $ref: '#/components/schemas/DeleteOneOperation'
+                    $ref: '#/components/schemas/TransactionOperation'
                   example:
-                    - type: "insert-one"
+                    - type: "insertOne"
                       collection: "accounts"
                       document: { "account_id": "123", "balance": 1000 }
-                    - type: "update-one"
+                    - type: "findOneAndUpdate"
                       collection: "accounts"
-                      filter: { "account_id": "123" }
+                      filter: { "account_id": "456" }
                       update: { "$inc": { "balance": -100 } }
-                    - type: "insert-one"
-                      collection: "transactions"
-                      document: { "from": "123", "amount": 100, "timestamp": "2024-01-15T10:30:00Z" }
+                    - type: "deleteOne"
+                      collection: "temp_records"
+                      filter: { "status": "expired" }
+                transactionOptions:
+                  type: object
+                  description: MongoDB transaction options
+                  properties:
+                    readConcern:
+                      type: object
+                      description: Read concern for the transaction
+                      example: { "level": "majority" }
+                    writeConcern:
+                      type: object
+                      description: Write concern for the transaction
+                      example: { "w": "majority" }
+                    maxCommitTimeMS:
+                      type: number
+                      description: Maximum time to allow for the transaction commit in milliseconds
+                      example: 1000
+                  example:
+                    readConcern: { "level": "majority" }
+                    writeConcern: { "w": "majority" }
+                    maxCommitTimeMS: 1000
       responses:
         '200':
           description: Transaction completed successfully
@@ -623,25 +641,23 @@ paths:
                   data:
                     type: array
                     items:
-                      $ref: '#/components/schemas/OperationResult'
-                    description: Results from each operation in order
+                      $ref: '#/components/schemas/TransactionResult'
+                    description: Results from each operation in execution order
                   operationCount:
                     type: number
                     description: Total number of operations executed
                 example:
                   data:
-                    - operation: 0
-                      type: "insert-one"
+                    - type: "insertOne"
                       collection: "accounts"
-                      result: { "_id": "507f1f77bcf86cd799439011", "account_id": "123", "balance": 1000 }
-                    - operation: 1
-                      type: "update-one"
+                      data: { "_id": "507f1f77bcf86cd799439011", "account_id": "123", "balance": 1000 }
+                      insertedId: "507f1f77bcf86cd799439011"
+                    - type: "findOneAndUpdate"
                       collection: "accounts"
-                      result: { "_id": "507f1f77bcf86cd799439011", "account_id": "123", "balance": 900 }
-                    - operation: 2
-                      type: "insert-one"
-                      collection: "transactions"
-                      result: { "_id": "507f1f77bcf86cd799439012", "from": "123", "amount": 100 }
+                      data: { "_id": "507f1f77bcf86cd799439012", "account_id": "456", "balance": 900 }
+                    - type: "deleteOne"
+                      collection: "temp_records"
+                      deletedCount: 1
                   operationCount: 3
         '400':
           $ref: '#/components/responses/BadRequestError'
@@ -721,7 +737,7 @@ components:
               type: string
               description: Request ID for tracing
 
-    FindOneOperation:
+    TransactionOperation:
       type: object
       required:
         - type
@@ -729,130 +745,58 @@ components:
       properties:
         type:
           type: string
-          enum: ["find-one"]
+          enum: ["findOneAndUpdate", "insertOne", "deleteOne"]
+          description: Type of operation to perform
         collection:
           type: string
           description: Name of the collection
         filter:
           type: object
-          description: MongoDB query filter
-          default: {}
-        options:
-          type: object
-          description: MongoDB findOne options
-          default: {}
-      example:
-        type: "find-one"
-        collection: "users"
-        filter: { "_id": "507f1f77bcf86cd799439011" }
-
-    InsertOneOperation:
-      type: object
-      required:
-        - type
-        - collection
-        - document
-      properties:
-        type:
-          type: string
-          enum: ["insert-one"]
-        collection:
-          type: string
-          description: Name of the collection
+          description: MongoDB query filter (required for findOneAndUpdate and deleteOne)
         document:
           type: object
-          description: Document to insert
-        options:
-          type: object
-          description: MongoDB insertOne options
-          default: {}
-      example:
-        type: "insert-one"
-        collection: "users"
-        document: { "name": "John Doe", "email": "john@example.com" }
-
-    UpdateOneOperation:
-      type: object
-      required:
-        - type
-        - collection
-        - filter
-        - update
-      properties:
-        type:
-          type: string
-          enum: ["update-one"]
-        collection:
-          type: string
-          description: Name of the collection
-        filter:
-          type: object
-          description: MongoDB query filter
+          description: Document to insert (required for insertOne)
         update:
           type: object
-          description: MongoDB update operation
+          description: MongoDB update operation (required for findOneAndUpdate)
         options:
           type: object
-          description: MongoDB findOneAndUpdate options
+          description: MongoDB operation-specific options
           default: {}
       example:
-        type: "update-one"
+        type: "findOneAndUpdate"
         collection: "users"
         filter: { "_id": "507f1f77bcf86cd799439011" }
         update: { "$set": { "status": "inactive" } }
 
-    DeleteOneOperation:
+    TransactionResult:
       type: object
       required:
         - type
         - collection
-        - filter
       properties:
-        type:
-          type: string
-          enum: ["delete-one"]
-        collection:
-          type: string
-          description: Name of the collection
-        filter:
-          type: object
-          description: MongoDB query filter
-        options:
-          type: object
-          description: MongoDB deleteOne options
-          default: {}
-      example:
-        type: "delete-one"
-        collection: "users"
-        filter: { "_id": "507f1f77bcf86cd799439011" }
-
-    OperationResult:
-      type: object
-      required:
-        - operation
-        - type
-        - collection
-        - result
-      properties:
-        operation:
-          type: number
-          description: Operation index (0-based)
         type:
           type: string
           description: Type of operation that was executed
-          enum: ["find-one", "insert-one", "update-one", "delete-one"]
+          enum: ["findOneAndUpdate", "insertOne", "deleteOne"]
         collection:
           type: string
           description: Collection the operation was performed on
-        result:
+        data:
           type: object
           nullable: true
-          description: Result of the operation (varies by operation type, may be null if no document found)
+          description: The resulting document (for findOneAndUpdate and insertOne operations)
+        insertedId:
+          type: string
+          description: ID of the inserted document (only present for insertOne operations)
+        deletedCount:
+          type: number
+          description: Number of documents deleted (only present for deleteOne operations)
       example:
-        operation: 0
-        type: "insert-one"
+        type: "insertOne"
         collection: "users"
-        result: { "_id": "507f1f77bcf86cd799439011", "name": "John Doe", "email": "john@example.com" }
+        data: { "_id": "507f1f77bcf86cd799439011", "name": "John Doe", "email": "john@example.com" }
+        insertedId: "507f1f77bcf86cd799439011"
 
 tags:
   - name: Health
@@ -862,4 +806,6 @@ tags:
   - name: Collections
     description: Collection management
   - name: Indexes
-    description: Index management 
+    description: Index management
+  - name: Transactions
+    description: Multi-document atomic transactions 
