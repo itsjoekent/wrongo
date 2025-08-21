@@ -235,11 +235,13 @@ app.post('/v0/find-one', async (c) => {
   });
 });
 
-const InsertOneSchema = z.object({
-  collection: z.string(),
-  document: z.looseObject({}),
-  options: z.looseObject({}).default({}),
-}).strict();
+const InsertOneSchema = z
+  .object({
+    collection: z.string(),
+    document: z.looseObject({}),
+    options: z.looseObject({}).default({}),
+  })
+  .strict();
 
 app.post('/v0/insert-one', async (c) => {
   const body = await c.req.json();
