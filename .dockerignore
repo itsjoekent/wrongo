@@ -1,0 +1,49 @@
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+
+# Build output
+dist
+coverage
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Test files and CI
+test/
+.github/
+*.test.ts
+*.test.js
+vitest.config.ts
+
+# Documentation
+README.md
+LICENSE
+
+# Logs
+logs
+*.log 
