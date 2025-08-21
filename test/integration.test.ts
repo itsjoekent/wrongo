@@ -495,40 +495,6 @@ describe('MongoDB REST API Integration Tests', () => {
       const data = await response.json();
       expect(data.data.indexName).toBeTruthy();
     });
-
-    it('should drop an index', async () => {
-      // Setup: Insert a document and create an index first
-      await makeRequest('/v0/insert-one', {
-        method: 'POST',
-        body: JSON.stringify({
-          collection: testCollection,
-          document: { name: 'index test', email: 'test@example.com' },
-        }),
-      });
-
-      await makeRequest('/v0/create-index', {
-        method: 'POST',
-        body: JSON.stringify({
-          collection: testCollection,
-          keys: { email: 1 },
-          options: { unique: true },
-        }),
-      });
-
-      const response = await makeRequest('/v0/drop-index', {
-        method: 'POST',
-        body: JSON.stringify({
-          collection: testCollection,
-          index: { email: 1 },
-        }),
-      });
-
-      expect(response.status).toBe(200);
-
-      const data = await response.json();
-      expect(data.data).toBeTruthy();
-      // Just verify we get a response - MongoDB dropIndex behavior varies
-    });
   });
 
   describe('Transaction Operations', () => {

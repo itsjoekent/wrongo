@@ -3,7 +3,7 @@ version: '3.8'
 services:
   mongodb:
     image: mongo:7
-    command: mongod --replSet rs0 --bind_ip_all
+    command: mongod --replSet rs0 --bind_ip_all --quiet --logpath /dev/null
     ports:
       - "27017:27017"
     volumes:
@@ -23,7 +23,23 @@ services:
     command: >
       bash -c "
         sleep 5 &&
-        mongosh --host mongodb:27017 --quiet --eval 'rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongodb:27017\"}]})'
+        mongosh --host mongodb:27017 --quiet --eval '
+          try {
+            var result = rs.initiate({_id:\"rs0\",members:[{_id:0,host:\"mongodb:27017\"}]});
+            if (result.ok === 1) {
+              print(\"Replica set initialized successfully\");
+            } else {
+              print(\"Replica set initialization result:\", JSON.stringify(result));
+            }
+          } catch (e) {
+            if (e.message && e.message.includes(\"already initialized\")) {
+              print(\"Replica set already initialized\");
+            } else {
+              print(\"Error initializing replica set:\", e.message);
+              throw e;
+            }
+          }
+        ' || echo 'Replica set initialization completed'
       "
     restart: "no"
 

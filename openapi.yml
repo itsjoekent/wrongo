@@ -532,52 +532,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /v0/drop-index:
-    post:
-      summary: Drop index
-      description: Drop an index from a collection
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - collection
-                - index
-              properties:
-                collection:
-                  type: string
-                  description: Name of the collection
-                  example: "users"
-                index:
-                  type: string
-                  description: Name of the index to drop
-                  example: "email_unique"
-                options:
-                  type: object
-                  description: Drop index options
-      responses:
-        '200':
-          description: Index dropped successfully
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: object
-                    properties:
-                      acknowledged:
-                        type: boolean
-                        description: Whether the operation was acknowledged
-        '400':
-          $ref: '#/components/responses/BadRequestError'
-        '401':
-          $ref: '#/components/responses/UnauthorizedError'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /v0/transaction:
     post:
       summary: Execute transaction

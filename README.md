@@ -15,13 +15,17 @@ Connect Cloudflare Workers 🌐 to MongoDB 🍃 through an API (_for SQL haters 
 
 ### Prerequisites
 - Node.js 22.18.0 or higher
-- Docker (for testing with testcontainers)
+- Docker (required for testing with testcontainers)
 
 ### Local Development
 
 ```bash
-npm install
-npm test
+$ npm install
+$ npm test
+
+# Run server locally
+$ docker compose build
+$ docker compose up
 ```
 
 ## Testing

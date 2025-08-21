@@ -201,8 +201,8 @@ app.get('/', async (c) => {
 
 const FindSchema = z.object({
   collection: z.string(),
-  filter: z.any().default({}),
-  options: z.any().default({}),
+  filter: z.looseObject({}).default({}),
+  options: z.looseObject({}).default({}),
 });
 
 app.post('/v0/find', async (c) => {
@@ -237,9 +237,9 @@ app.post('/v0/find-one', async (c) => {
 
 const InsertOneSchema = z.object({
   collection: z.string(),
-  document: z.any(),
-  options: z.any().default({}),
-});
+  document: z.looseObject({}),
+  options: z.looseObject({}).default({}),
+}).strict();
 
 app.post('/v0/insert-one', async (c) => {
   const body = await c.req.json();
@@ -260,8 +260,8 @@ app.post('/v0/insert-one', async (c) => {
 
 const InsertManySchema = z.object({
   collection: z.string(),
-  documents: z.array(z.any()),
-  options: z.any().default({}),
+  documents: z.array(z.looseObject({})),
+  options: z.looseObject({}).default({}),
 });
 
 app.post('/v0/insert-many', async (c) => {
@@ -285,9 +285,9 @@ app.post('/v0/insert-many', async (c) => {
 
 const UpdateOneSchema = z.object({
   collection: z.string(),
-  filter: z.any(),
-  update: z.any(),
-  options: z.any().default({}),
+  filter: z.looseObject({}),
+  update: z.looseObject({}),
+  options: z.looseObject({}).default({}),
 });
 
 app.post('/v0/update-one', async (c) => {
@@ -308,9 +308,9 @@ app.post('/v0/update-one', async (c) => {
 
 const UpdateManySchema = z.object({
   collection: z.string(),
-  filter: z.any(),
-  update: z.any(),
-  options: z.any().default({}),
+  filter: z.looseObject({}),
+  update: z.looseObject({}),
+  options: z.looseObject({}).default({}),
 });
 
 app.post('/v0/update-many', async (c) => {
@@ -343,8 +343,8 @@ app.post('/v0/update-many', async (c) => {
 
 const DeleteOneSchema = z.object({
   collection: z.string(),
-  filter: z.any(),
-  options: z.any().default({}),
+  filter: z.looseObject({}),
+  options: z.looseObject({}).default({}),
 });
 
 app.post('/v0/delete-one', async (c) => {
@@ -362,8 +362,8 @@ app.post('/v0/delete-one', async (c) => {
 
 const DeleteManySchema = z.object({
   collection: z.string(),
-  filter: z.any(),
-  options: z.any().default({}),
+  filter: z.looseObject({}),
+  options: z.looseObject({}).default({}),
 });
 
 app.post('/v0/delete-many', async (c) => {
@@ -381,8 +381,8 @@ app.post('/v0/delete-many', async (c) => {
 
 const CountSchema = z.object({
   collection: z.string(),
-  filter: z.any().default({}),
-  options: z.any().default({}),
+  filter: z.looseObject({}).default({}),
+  options: z.looseObject({}).default({}),
 });
 
 app.post('/v0/count', async (c) => {
@@ -405,7 +405,7 @@ app.get('/v0/collections', async (c) => {
 const CreateIndexSchema = z.object({
   collection: z.string(),
   keys: z.any(),
-  options: z.any().default({}),
+  options: z.looseObject({}).default({}),
 });
 
 app.post('/v0/create-index', async (c) => {
@@ -421,34 +421,18 @@ app.post('/v0/create-index', async (c) => {
   });
 });
 
-const DropIndexSchema = z.object({
-  collection: z.string(),
-  index: z.union([z.string(), z.any()]),
-  options: z.any().default({}),
-});
-
-app.post('/v0/drop-index', async (c) => {
-  const body = await c.req.json();
-  const { collection, index, options } = validateWithZod(DropIndexSchema, body);
-  const result = await db.collection(collection).dropIndex(index, options);
-
-  return c.json({
-    data: { acknowledged: result.acknowledged },
-  });
-});
-
 const TransactionOperationSchema = z.object({
   type: z.enum(['findOneAndUpdate', 'insertOne', 'deleteOne']),
   collection: z.string(),
-  filter: z.any().optional(),
-  document: z.any().optional(),
-  update: z.any().optional(),
-  options: z.any().default({}),
+  filter: z.looseObject({}).optional(),
+  document: z.looseObject({}).optional(),
+  update: z.looseObject({}).optional(),
+  options: z.looseObject({}).default({}),
 });
 
 const TransactionSchema = z.object({
   operations: z.array(TransactionOperationSchema),
-  transactionOptions: z.any().default({}),
+  transactionOptions: z.looseObject({}).default({}),
 });
 
 app.post('/v0/transaction', async (c) => {
@@ -464,32 +448,6 @@ app.post('/v0/transaction', async (c) => {
     });
   }
 
-  for (const [index, operation] of operations.entries()) {
-    switch (operation.type) {
-      case 'findOneAndUpdate':
-        if (!operation.filter || !operation.update) {
-          throw new HTTPException(400, {
-            message: `Operation ${index}: findOneAndUpdate requires filter and update fields`,
-          });
-        }
-        break;
-      case 'insertOne':
-        if (!operation.document) {
-          throw new HTTPException(400, {
-            message: `Operation ${index}: insertOne requires document field`,
-          });
-        }
-        break;
-      case 'deleteOne':
-        if (!operation.filter) {
-          throw new HTTPException(400, {
-            message: `Operation ${index}: deleteOne requires filter field`,
-          });
-        }
-        break;
-    }
-  }
-
   const results = await client.withSession(async (session) =>
     session.withTransaction(
       async (session) => {
@@ -500,6 +458,12 @@ app.post('/v0/transaction', async (c) => {
 
           switch (operation.type) {
             case 'findOneAndUpdate': {
+              if (!operation.filter || !operation.update) {
+                throw new HTTPException(400, {
+                  message: 'findOneAndUpdate requires filter and update fields',
+                });
+              }
+
               const result = await collection.findOneAndUpdate(
                 operation.filter,
                 operation.update,
@@ -518,6 +482,12 @@ app.post('/v0/transaction', async (c) => {
             }
 
             case 'insertOne': {
+              if (!operation.document) {
+                throw new HTTPException(400, {
+                  message: 'insertOne requires document field',
+                });
+              }
+
               const insertResult = await collection.insertOne(
                 operation.document,
                 { ...operation.options, session },
@@ -538,6 +508,12 @@ app.post('/v0/transaction', async (c) => {
             }
 
             case 'deleteOne': {
+              if (!operation.filter) {
+                throw new HTTPException(400, {
+                  message: 'deleteOne requires filter field',
+                });
+              }
+
               const deleteResult = await collection.deleteOne(
                 operation.filter,
                 {
